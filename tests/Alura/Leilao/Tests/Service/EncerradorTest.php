@@ -7,33 +7,6 @@ use Alura\Leilao\Model\Leilao;
 use Alura\Leilao\Service\Encerrador;
 use PHPUnit\Framework\TestCase;
 
-class LeilaoDaoMock extends LeilaoDao
-{
-    private $leiloes = [];
-    public function salva(Leilao $leilao): void
-    {
-        $this->leiloes[] = $leilao;
-    }
-
-    public function recuperarNaoFinalizados(): array
-    {
-        return array_filter($this->leiloes, function(Leilao $leilao) {
-            return !$leilao->estaFinalizado();
-        });
-    }
-
-    public function recuperarFinalizados(): array
-    {
-        return array_filter($this->leiloes, function(Leilao $leilao) {
-            return $leilao->estaFinalizado();
-        });
-    }
-
-    public function atualiza(Leilao $leilao)
-    {
-
-    }
-}
 class EncerradorTest extends TestCase {
 
     public function testLeiloesComMaisDeUmaSemanaDevemSerEncerrados()
@@ -41,15 +14,29 @@ class EncerradorTest extends TestCase {
         $fiat = new Leilao('Fiat 147 0Km', new \DateTimeImmutable('8 days ago'));
         $variant = new Leilao('Variant 1972 0Km', new \DateTimeImmutable('10 days ago'));
 
-        $leilaoDao = new LeilaoDaoMock();
-        $leilaoDao->salva($fiat);
-        $leilaoDao->salva($variant);
+        $leilaoDao = $this->createMock(LeilaoDao::class);
+        $leilaoDao->method('recuperarFinalizados')
+            ->willReturn([$fiat, $variant]);
+        $leilaoDao->expects(self::once())
+            ->method('recuperarNaoFinalizados')
+            ->willReturn([$fiat, $variant]);
+
+        $leilaoDao->expects($this->exactly(2))
+            ->method('atualiza')
+            ->withConsecutive(
+                [$fiat],
+                [$variant]
+            );
+
 
         $encerrador = new Encerrador($leilaoDao);
         $encerrador->encerra();
 
         $leiloes = $leilaoDao->recuperarFinalizados();
+
         self::assertCount(2, $leiloes);
+        static::assertTrue($leiloes[0]->estaFinalizado());
+        static::assertTrue($leiloes[1]->estaFinalizado());
         self::assertEquals('Fiat 147 0Km', $leiloes[0]->recuperarDescricao());
         self::assertEquals('Variant 1972 0Km', $leiloes[1]->recuperarDescricao());
     }
