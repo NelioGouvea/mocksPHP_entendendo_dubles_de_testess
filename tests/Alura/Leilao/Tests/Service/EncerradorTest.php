@@ -5,39 +5,70 @@ namespace Alura\Leilao\Tests\Service;
 use Alura\Leilao\Dao\Leilao as LeilaoDao;
 use Alura\Leilao\Model\Leilao;
 use Alura\Leilao\Service\Encerrador;
+use Alura\Leilao\Service\EnviadorEmail;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
-class EncerradorTest extends TestCase {
+class EncerradorTest extends TestCase
+{
+    private $encerrador;
+    /** @var MockObject */
+    private $enviadorEmail;
+    private $leilaoFiat147;
+    private $leilaoVariante;
 
-    public function testLeiloesComMaisDeUmaSemanaDevemSerEncerrados()
+    protected function setUp(): void
     {
-        $fiat = new Leilao('Fiat 147 0Km', new \DateTimeImmutable('8 days ago'));
-        $variant = new Leilao('Variant 1972 0Km', new \DateTimeImmutable('10 days ago'));
-
+        $this->leilaoFiat147 = new Leilao(
+            'Fiat 147 0Km',
+            new \DateTimeImmutable('8 days ago')
+        );
+        $this->leilaoVariante = new Leilao(
+            'Variant 1972 0Km',
+            new \DateTimeImmutable('10 days ago')
+        );
         $leilaoDao = $this->createMock(LeilaoDao::class);
-        $leilaoDao->method('recuperarFinalizados')
-            ->willReturn([$fiat, $variant]);
-        $leilaoDao->expects(self::once())
-            ->method('recuperarNaoFinalizados')
-            ->willReturn([$fiat, $variant]);
-
+        $leilaoDao->method('recuperarNaoFinalizados')
+            ->willReturn([$this->leilaoFiat147, $this->leilaoVariante]);
         $leilaoDao->expects($this->exactly(2))
             ->method('atualiza')
             ->withConsecutive(
-                [$fiat],
-                [$variant]
+                [$this->leilaoFiat147],
+                [$this->leilaoVariante]
             );
+        $this->enviadorEmail = $this->createMock(EnviadorEmail::class);
 
+        $this->encerrador = new Encerrador($leilaoDao, $this->enviadorEmail);
+    }
 
-        $encerrador = new Encerrador($leilaoDao);
-        $encerrador->encerra();
+    public function testLeiloesComMaisDeUmaSemanaDevemSerEncerrados()
+    {
+        $this->encerrador->encerra();
 
-        $leiloes = $leilaoDao->recuperarFinalizados();
-
+        $leiloes = [$this->leilaoFiat147, $this->leilaoVariante];
         self::assertCount(2, $leiloes);
-        static::assertTrue($leiloes[0]->estaFinalizado());
-        static::assertTrue($leiloes[1]->estaFinalizado());
-        self::assertEquals('Fiat 147 0Km', $leiloes[0]->recuperarDescricao());
-        self::assertEquals('Variant 1972 0Km', $leiloes[1]->recuperarDescricao());
+        self::assertTrue($leiloes[0]->estaFinalizado());
+        self::assertTrue($leiloes[1]->estaFinalizado());
+    }
+
+    public function testDeveContinuarOProcessamentoAoEncontrarErroAoEnviarEmail()
+    {
+        $e = new \DomainException('Erro ao enviar e-mail');
+        $this->enviadorEmail->expects($this->exactly(2))
+            ->method('notificarTerminoLeilao')
+            ->willThrowException($e);
+
+        $this->encerrador->encerra();
+    }
+
+    public function testSoDeveEnviarLeilaoPorEmailAposFinalizado()
+    {
+        $this->enviadorEmail->expects($this->exactly(2))
+            ->method('notificarTerminoLeilao')
+            ->willReturnCallback(function (Leilao $leilao) {
+            self::assertTrue($leilao->estaFinalizado());
+        });
+
+        $this->encerrador->encerra();
     }
 }
